@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  web:
+    image: node:18.20.3
+    ports:
+      - 5173:5173
+    working_dir: /work
+    volumes:
+      - .:/work
+    command: sh -c "npm install -g npm@10.2.3 && npm ci && npm run dev"
+    restart: always
