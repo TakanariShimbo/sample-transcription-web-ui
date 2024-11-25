@@ -10,12 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { type SubmitFormValues, submitFormSchema } from "@/lib/schemas";
-
-// ダミーの文字起こしリクエスト送信関数
-const submitTranscriptionRequest = async ({ file, language }: { file: File; language: string }): Promise<string> => {
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  return crypto.randomUUID();
-};
+import { addTranscriptionJobDummy as addTranscriptionJob } from "@/lib/api";
 
 const AudioFileField = ({ control }: { control: Control<SubmitFormValues> }): JSX.Element => (
   <FormField
@@ -119,7 +114,7 @@ export const SubmitForm = (): JSX.Element => {
 
   const onSubmit = async ({ audioFile, language }: SubmitFormValues) => {
     try {
-      const result = await submitTranscriptionRequest({ file: audioFile, language: language });
+      const result = await addTranscriptionJob({ audio_file: audioFile, language: language });
       setUuid(result);
       showToast({ variant: "success", title: "申請完了", description: "リクエストが正常に送信されました。" });
     } catch (error) {

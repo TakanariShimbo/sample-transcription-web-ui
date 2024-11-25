@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Loader, Copy, AlertCircle, CheckCircle } from "lucide-react";
+import { Loader, Copy, AlertCircle, CheckCircle, Trash } from "lucide-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -8,37 +8,72 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { type ResultFormValues, resultFormSchema } from "@/lib/schemas";
+import {
+  type TranscriptionResult,
+  checkTranscriptionResultDummy as checkTranscriptionResult,
+  removeTranscriptionResultDummy as removeTranscriptionResult,
+  cancelTranscriptionJobDummy as cancelTranscriptionJob,
+} from "@/lib/api";
 
-type TranscriptionResult = {
-  status: "queued" | "completed" | "not_found";
-  data?: { position?: number; text?: string };
+const DialogTrashButton = ({
+  title,
+  description,
+  buttonText,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  buttonText: string;
+  onConfirm: () => Promise<void>;
+}) => {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button type="button" variant="destructive" className="flex-shrink-0 text-background">
+          <Trash className="h-5 w-5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-center space-x-4">
+          <DialogClose asChild>
+            <Button type="button" variant="destructive" onClick={onConfirm}>
+              {buttonText}
+            </Button>
+          </DialogClose>
+          <DialogClose asChild>
+            <Button type="button" variant="secondary">
+              閉じる
+            </Button>
+          </DialogClose>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 };
 
-const checkTranscriptionStatus = async ({ uuid }: { uuid: string }): Promise<TranscriptionResult> => {
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-
-  const random = Math.random();
-  if (random < 0.3) {
-    return { status: "queued", data: { position: Math.floor(Math.random() * 10) + 1 } };
-  } else if (random < 0.6) {
-    return {
-      status: "completed",
-      data: {
-        text: "これは文字起こしの結果のサンプルテキストです。実際のAPIでは、音声ファイルから変換されたテキストが表示されます。これは文字起こしの結果のサンプルテキストです。実際のAPIでは、音声ファイルから変換されたテキストが表示されます。これは文字起こしの結果のサンプルテキストです。実際のAPIでは、音声ファイルから変換されたテキストが表示されます。",
-      },
-    };
-  } else {
-    return { status: "not_found" };
-  }
-};
-
-const CompletedResult = ({ text, onCopy }: { text: string; onCopy: (text: string) => void }): JSX.Element => {
+const CompletedResult = ({
+  text,
+  onCopy,
+  onRemove,
+}: {
+  text: string;
+  onCopy: (text: string) => void;
+  onRemove: () => Promise<void>;
+}): JSX.Element => {
   return (
     <div className="space-y-4">
-      <Alert variant="default" className="bg-green-100 text-foreground">
-        <AlertDescription>文字起こしが完了しました。</AlertDescription>
+      <Alert variant="default" className="bg-green-100 text-foreground p-6">
+        <div className="flex justify-between items-center gap-4">
+          <AlertDescription>文字起こしが完了しました。</AlertDescription>
+          <DialogTrashButton title="結果の削除" description="本当に文字起こし結果を履歴から削除しますか？" buttonText="削除" onConfirm={onRemove} />
+        </div>
       </Alert>
       <Card className="bg-muted">
         <CardContent className="pt-6">
@@ -54,10 +89,22 @@ const CompletedResult = ({ text, onCopy }: { text: string; onCopy: (text: string
   );
 };
 
-const QueuedResult = ({ position }: { position: number }): JSX.Element => {
+const QueuedResult = ({ position, onCancel }: { position: number; onCancel: () => Promise<void> }): JSX.Element => {
   return (
     <Alert className="bg-yellow-100 text-foreground">
-      <AlertDescription>現在順番待ちです。あなたの順番は {position} 番目です。</AlertDescription>
+      {position === 0 ? (
+        <AlertDescription>現在文字起こし中です。もう少しで完了します。</AlertDescription>
+      ) : (
+        <div className="flex justify-between items-center gap-4">
+          <AlertDescription>現在順番待ちです。あなたの順番は {position} 番目です。</AlertDescription>
+          <DialogTrashButton
+            title="予約のキャンセル"
+            description="本当に文字起こし予約をキャンセルしますか？"
+            buttonText="キャンセル"
+            onConfirm={onCancel}
+          />
+        </div>
+      )}
     </Alert>
   );
 };
@@ -104,16 +151,31 @@ const FormComponent = ({ form, onSubmit }: { form: any; onSubmit: (values: Resul
   </Form>
 );
 
-const ResultDisplay = ({ result, handleCopyText }: { result: TranscriptionResult | null; handleCopyText: (text: string) => Promise<void> }) => (
+const ResultDisplay = ({
+  result,
+  handleCopyText,
+  handleRemoveResult,
+  handleCancelJob,
+}: {
+  result: TranscriptionResult | null;
+  handleCopyText: (text: string) => Promise<void>;
+  handleRemoveResult: () => Promise<void>;
+  handleCancelJob: () => Promise<void>;
+}) => (
   <div className="mt-6 space-y-4">
-    {result?.status === "queued" && result.data?.position !== undefined && <QueuedResult position={result.data.position} />}
-    {result?.status === "completed" && result.data?.text && <CompletedResult text={result.data.text} onCopy={handleCopyText} />}
+    {result?.status === "queued" && result.data?.position !== undefined && (
+      <QueuedResult position={result.data.position} onCancel={handleCancelJob} />
+    )}
+    {result?.status === "completed" && result.data?.text && (
+      <CompletedResult text={result.data.text} onCopy={handleCopyText} onRemove={handleRemoveResult} />
+    )}
     {result?.status === "not_found" && <NotFoundResult />}
   </div>
 );
 
 export const ResultForm = (): JSX.Element => {
   const [result, setResult] = useState<TranscriptionResult | null>(null);
+  const [submittedValues, setSubmittedValues] = useState<ResultFormValues | null>(null);
   const { toast } = useToast();
 
   const form = useForm<ResultFormValues>({
@@ -135,7 +197,8 @@ export const ResultForm = (): JSX.Element => {
 
   const onSubmit = async (values: ResultFormValues) => {
     try {
-      const response = await checkTranscriptionStatus({ uuid: values.uuid });
+      const response = await checkTranscriptionResult({ uuid: values.uuid });
+      setSubmittedValues(values);
       setResult(response);
     } catch (error) {
       showToast({ variant: "error", title: "エラー", description: "ステータス確認中にエラーが発生しました。" });
@@ -147,11 +210,31 @@ export const ResultForm = (): JSX.Element => {
     showToast({ variant: "success", title: "コピー完了", description: "文字起こし結果をクリップボードにコピーしました。" });
   };
 
+  const handleRemoveResult = async () => {
+    if (!submittedValues) return;
+    try {
+      await removeTranscriptionResult({ uuid: submittedValues.uuid });
+      showToast({ variant: "success", title: "削除完了", description: "文字起こし結果を削除しました。" });
+    } catch (error) {
+      showToast({ variant: "error", title: "エラー", description: "結果の削除中にエラーが発生しました。" });
+    }
+  };
+
+  const handleCancelJob = async () => {
+    if (!submittedValues) return;
+    try {
+      await cancelTranscriptionJob({ uuid: submittedValues.uuid });
+      showToast({ variant: "success", title: "キャンセル完了", description: "文字起こし予約をキャンセルしました。" });
+    } catch (error) {
+      showToast({ variant: "error", title: "エラー", description: "予約のキャンセル中にエラーが発生しました。" });
+    }
+  };
+
   return (
     <Card>
       <CardContent className="pt-6">
         <FormComponent form={form} onSubmit={onSubmit} />
-        <ResultDisplay result={result} handleCopyText={handleCopyText} />
+        <ResultDisplay result={result} handleCopyText={handleCopyText} handleRemoveResult={handleRemoveResult} handleCancelJob={handleCancelJob} />
       </CardContent>
     </Card>
   );
